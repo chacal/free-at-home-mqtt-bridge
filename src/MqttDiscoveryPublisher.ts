@@ -34,7 +34,7 @@ export default class MqttDiscoveryPublisher {
     }
 
     private sendDiscovery(deviceId: string, chId: string, discoveryData: {}) {
-        this.mqttClient.publish(`homeassistant/light/${deviceId}_${chId}/config`, JSON.stringify(discoveryData))
+        this.mqttClient.publish(`homeassistant/light/${deviceId}_${chId}/config`, JSON.stringify(discoveryData), {retain: true})
     }
 }
 
