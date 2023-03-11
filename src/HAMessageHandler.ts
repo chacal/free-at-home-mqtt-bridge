@@ -24,32 +24,42 @@ export default class HAMessageHandler {
             const chId = m[2]
 
             if (topic.endsWith('switch')) {
-                const datapointId = this.findInputDataPointIdForPairingId(deviceId, chId, AL_SWITCH_ON_OFF)
-                const payload = msg === 'ON' ? '1' : '0'
-                this.setDataPoint(deviceId, chId, datapointId, payload)
+                this.handleSwitchMsg(deviceId, chId, msg)
             } else if (topic.endsWith('brightness/set')) {
-                const datapointId = this.findInputDataPointIdForPairingId(deviceId, chId, AL_ABSOLUTE_SET_VALUE_CONTROL)
-                this.brightnessCache.set(deviceId, chId, msg)
-                this.setDataPoint(deviceId, chId, datapointId, msg)
+                this.handleSetBrightnessMsg(deviceId, chId, msg)
             } else if (topic.endsWith('color_temp/set')) {
-                const datapointId = this.findInputDataPointIdForPairingId(deviceId, chId, AL_COLOR_TEMPERATURE)
-                const payload = scaleColorTempFromHAtoFaH(msg)
-                this.setDataPoint(deviceId, chId, datapointId, payload)
-
-                // (Re)set brightness after setting color. Otherwise CT dimmers won't react properly to switch off
-                // command in the future.
-                setTimeout(() => {
-                    const datapointId = this.findInputDataPointIdForPairingId(deviceId, chId, AL_ABSOLUTE_SET_VALUE_CONTROL)
-                    const cachedBrightness = this.brightnessCache.get(deviceId, chId)
-                    this.setDataPoint(deviceId, chId, datapointId, cachedBrightness)
-                }, CACHED_BRIGHTNESS_SEND_DELAY_MS)
+                this.handleSetColorMsg(deviceId, chId, msg)
             } else if (topic.endsWith('brightness')) {
                 this.brightnessCache.set(deviceId, chId, msg)
             }
         }
     }
 
-    findInputDataPointIdForPairingId(deviceId: string, channelId: string, pairingId: number) {
+    private handleSwitchMsg(deviceId: string, chId: string, msg: string) {
+        const datapointId = this.findInputDataPointIdForPairingId(deviceId, chId, AL_SWITCH_ON_OFF)
+        const payload = msg === 'ON' ? '1' : '0'
+        this.setDataPoint(deviceId, chId, datapointId, payload)
+    }
+
+    private handleSetBrightnessMsg(deviceId: string, chId: string, msg: string) {
+        const datapointId = this.findInputDataPointIdForPairingId(deviceId, chId, AL_ABSOLUTE_SET_VALUE_CONTROL)
+        this.brightnessCache.set(deviceId, chId, msg)
+        this.setDataPoint(deviceId, chId, datapointId, msg)
+    }
+
+    private handleSetColorMsg(deviceId: string, chId: string, msg: string) {
+        const datapointId = this.findInputDataPointIdForPairingId(deviceId, chId, AL_COLOR_TEMPERATURE)
+        const payload = scaleColorTempFromHAtoFaH(msg)
+        this.setDataPoint(deviceId, chId, datapointId, payload)
+
+        // (Re)set brightness to cached value after setting color. Otherwise CT dimmers won't react properly to switch off
+        // command in the future.
+        setTimeout(() => {
+            this.handleSetBrightnessMsg(deviceId, chId, this.brightnessCache.get(deviceId, chId))
+        }, CACHED_BRIGHTNESS_SEND_DELAY_MS)
+    }
+
+    private findInputDataPointIdForPairingId(deviceId: string, channelId: string, pairingId: number) {
         const channel = this.fahConfig[SYS_AP_ID]?.devices[deviceId]?.channels?.[channelId]
         if (channel !== undefined) {
             for (const inputDatapointId in channel.inputs) {
