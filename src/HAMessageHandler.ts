@@ -9,8 +9,11 @@ import {
 } from "./Constants"
 
 const TOPIC_REGEX = /^homeassistant\/light\/(.*?)_(.*?)\//m
+const CACHED_BRIGHTNESS_SEND_DELAY_MS = 3000
 
 export default class HAMessageHandler {
+    private brightnessCache = new BrightnessCache()
+
     constructor(private sysAP: SystemAccessPoint, private fahConfig: Configuration) {
     }
 
@@ -20,22 +23,28 @@ export default class HAMessageHandler {
             const deviceId = m[1]
             const chId = m[2]
 
-            let datapointId: string | undefined
-            let payload: string | undefined
-
             if (topic.endsWith('switch')) {
-                datapointId = this.findInputDataPointIdForPairingId(deviceId, chId, AL_SWITCH_ON_OFF)
-                payload = msg === 'ON' ? '1' : '0'
+                const datapointId = this.findInputDataPointIdForPairingId(deviceId, chId, AL_SWITCH_ON_OFF)
+                const payload = msg === 'ON' ? '1' : '0'
+                this.setDataPoint(deviceId, chId, datapointId, payload)
             } else if (topic.endsWith('brightness/set')) {
-                datapointId = this.findInputDataPointIdForPairingId(deviceId, chId, AL_ABSOLUTE_SET_VALUE_CONTROL)
-                payload = msg
+                const datapointId = this.findInputDataPointIdForPairingId(deviceId, chId, AL_ABSOLUTE_SET_VALUE_CONTROL)
+                this.brightnessCache.set(deviceId, chId, msg)
+                this.setDataPoint(deviceId, chId, datapointId, msg)
             } else if (topic.endsWith('color_temp/set')) {
-                datapointId = this.findInputDataPointIdForPairingId(deviceId, chId, AL_COLOR_TEMPERATURE)
-                payload = scaleColorTempFromHAtoFaH(msg)
-            }
+                const datapointId = this.findInputDataPointIdForPairingId(deviceId, chId, AL_COLOR_TEMPERATURE)
+                const payload = scaleColorTempFromHAtoFaH(msg)
+                this.setDataPoint(deviceId, chId, datapointId, payload)
 
-            if (datapointId !== undefined && payload !== undefined) {
-                this.sysAP.setDatapoint(SYS_AP_ID, deviceId, chId, datapointId, payload)
+                // (Re)set brightness after setting color. Otherwise CT dimmers won't react properly to switch off
+                // command in the future.
+                setTimeout(() => {
+                    const datapointId = this.findInputDataPointIdForPairingId(deviceId, chId, AL_ABSOLUTE_SET_VALUE_CONTROL)
+                    const cachedBrightness = this.brightnessCache.get(deviceId, chId)
+                    this.setDataPoint(deviceId, chId, datapointId, cachedBrightness)
+                }, CACHED_BRIGHTNESS_SEND_DELAY_MS)
+            } else if (topic.endsWith('brightness')) {
+                this.brightnessCache.set(deviceId, chId, msg)
             }
         }
     }
@@ -51,9 +60,29 @@ export default class HAMessageHandler {
         }
         return undefined
     }
+
+    private setDataPoint(deviceId: string, chId: string, datapointId?: string, value?: string) {
+        if (datapointId !== undefined && value !== undefined) {
+            this.sysAP.setDatapoint(SYS_AP_ID, deviceId, chId, datapointId, value)
+        }
+    }
 }
 
 function scaleColorTempFromHAtoFaH(tempFromHa: string) {
     const t = parseInt(tempFromHa)
     return Math.round(((t - MAX_MIREDS) / (MIN_MIREDS - MAX_MIREDS)) * 100).toString()
+}
+
+class BrightnessCache {
+    private cache: {
+        [key: string]: string
+    } = {}
+
+    set(deviceId: string, chId: string, brightness: string) {
+        this.cache[deviceId + chId] = brightness
+    }
+
+    get(deviceId: string, chId: string) {
+        return this.cache[deviceId + chId]
+    }
 }
