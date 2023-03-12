@@ -7,12 +7,14 @@ import {
     MIN_MIREDS,
     SYS_AP_ID
 } from "./Constants"
+import throttledQueue from 'throttled-queue'
 
 const TOPIC_REGEX = /^homeassistant\/light\/(.*?)_(.*?)\//m
 const CACHED_BRIGHTNESS_SEND_DELAY_MS = 3000
 
 export default class HAMessageHandler {
     private brightnessCache = new BrightnessCache()
+    private throttle = throttledQueue(10, 1000, true)
 
     constructor(private sysAP: SystemAccessPoint, private fahConfig: Configuration) {
     }
@@ -73,7 +75,7 @@ export default class HAMessageHandler {
 
     private setDataPoint(deviceId: string, chId: string, datapointId?: string, value?: string) {
         if (datapointId !== undefined && value !== undefined) {
-            this.sysAP.setDatapoint(SYS_AP_ID, deviceId, chId, datapointId, value)
+            this.throttle(() => this.sysAP.setDatapoint(SYS_AP_ID, deviceId, chId, datapointId, value))
         }
     }
 }
